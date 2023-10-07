@@ -1,0 +1,85 @@
+---
+title: "ADDITIONAL S GENE MUTATIONS OF A GISAID BATCH"
+author: "Sonia Perez-Castro. Microbiology Department. Complexo Hospitalario Universitario de Vigo"
+date: "2023"
+header-includes:
+  - \title{}
+  - \author{}
+  - \date{}
+output:
+  html_document:
+     number_sections: true
+     fig_caption: yes
+     toc: false
+always_allow_html: yes
+---
+
+```{r setup, include = FALSE, warning = FALSE, message = FALSE, echo = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The objective of this script is to obtain the S gene additional mutations and the GISAID accession id of a batch of samples submitted to GISAID. We consider a mutation as "variant defining" when present in >75% of the specific variant sequences in outbreak.info. Other mutations will be considered as "additional" mutations.
+
+# Load libraries and access to outbreak.info
+```{r, warning = FALSE, message = FALSE, echo = TRUE}
+library(outbreakinfo)
+library(dplyr)
+library(BBmisc)
+# use your GISAID credentials to authenticate in this step 
+outbreakinfo::authenticateUser()
+```
+# Input folder
+We create a folder in the directory of this script with the date (yyyymmdd format) of each batch. We will store in this folder both the input and output files. We set the variable "date" in this script for the current report
+
+```{r}
+date <-"20231007"
+```
+
+# Manual preparation of input data
+First of all, we select in GISAID the samples to include in the report and download the "Input for the Augur pipeline". We extract the tar file that contains:
+- A fasta file to upload to nextclade (https://clades.nextstrain.org). From nextclade we download the nextclade.csv file containing the mutations 
+- A tsv file containing the metadata
+
+The csv and the tsv files should be manually moved to the corresponding input folder and renamed as "nextclade.csv" and "gisaid.tsv", respectively. They will be used as input of this script.
+
+# Load input data
+```{r}
+csv <- read.csv(paste0(date,"/nextclade.csv"), sep = ";")
+gisaid <- read.csv(paste0(date,"/gisaid.tsv"), sep = "\t")
+```
+
+# Obtainig the additional mutations of each variant
+```{r}
+tbl <- matrix(ncol = 3, nrow = 0)
+for(i in 1:nrow(csv)){
+  muestra <- csv[i,]$seqName
+  lin <- csv[i,]$Nextclade_pango
+  mut <- explode(csv[i,]$aaSubstitutions, sep=",")
+  ref <- getMutationsByLineage(pangolin_lineage=lin, frequency=0.75, logInfo=FALSE)
+  adi <- mut[!(toupper(mut) %in% toupper(ref$mutation))]
+  row <- c(muestra, lin, paste(adi, collapse=","))
+  tbl <- rbind(tbl, row)
+}
+tbl <- data.frame(tbl)
+colnames(tbl) <- c("SAMPLE", "NEXTCLADE_LINEAGE","ADDITIONAL_MUTATIONS")
+
+# We keep all the S gene mutations and remove most of the mutations in other regions:
+tbl$ADDITIONAL_MUTATIONS <- gsub(pattern = "([ENM]:[A-Z]\\d+[A-Z],)|(ORF\\d[a-b]?:[A-Z]\\d+[A-Z],)", "", tbl$ADDITIONAL_MUTATIONS)
+```
+
+# Obtaining the accession id from GISAID:
+```{r}
+gisaid <- gisaid[colnames(gisaid) %in% c("strain","gisaid_epi_isl","date")]
+gisaid$week <- strftime(gisaid$date, format="%V")
+colnames(gisaid) <- c("SAMPLE","ACCESSION_ID","DATE","WEEK")
+```
+
+# Merging data in a csv file:
+```{r}
+total <- merge(tbl, gisaid, by="SAMPLE")
+total <- total[, c("WEEK","ACCESSION_ID","NEXTCLADE_LINEAGE","ADDITIONAL_MUTATIONS")]
+total
+write.csv(total, paste0(date,"/mutations.csv"), row.names=FALSE)
+```
+
+
